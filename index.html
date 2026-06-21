@@ -276,6 +276,8 @@
   <h1>Railroad <span>AR</span> &mdash; Charge Tracker</h1>
   <div class="header-actions">
     <button class="btn-export btn-secondary" onclick="exportCSV()">Export CSV</button>
+    <button class="btn-secondary" onclick="document.getElementById('qb-file-input').click()">Import from QuickBooks</button>
+    <input type="file" id="qb-file-input" accept=".csv,.xls,.xlsx,.iif" style="display:none" onchange="importQB(event)">
     <button class="btn-primary" onclick="openModal()">+ New Invoice</button>
   </div>
 </header>
@@ -353,6 +355,39 @@
     </div>
   </div>
 </main>
+
+<!-- Import Preview Modal -->
+<div class="modal-overlay" id="import-modal">
+  <div class="modal" style="max-width:680px">
+    <h2>Import from QuickBooks</h2>
+    <p style="color:var(--muted);font-size:0.88rem;margin-bottom:16px">
+      Found <strong id="import-count" style="color:var(--text)">0</strong> invoices. Preview (first 10 shown):
+    </p>
+    <div style="overflow-x:auto;border:1px solid var(--border);border-radius:8px;margin-bottom:18px">
+      <table style="width:100%;border-collapse:collapse;font-size:0.85rem">
+        <thead style="background:var(--surface)">
+          <tr>
+            <th style="padding:9px 12px;text-align:left;color:var(--muted);font-size:0.75rem;text-transform:uppercase">Inv #</th>
+            <th style="padding:9px 12px;text-align:left;color:var(--muted);font-size:0.75rem;text-transform:uppercase">Customer</th>
+            <th style="padding:9px 12px;text-align:left;color:var(--muted);font-size:0.75rem;text-transform:uppercase">Date</th>
+            <th style="padding:9px 12px;text-align:left;color:var(--muted);font-size:0.75rem;text-transform:uppercase">Amount</th>
+            <th style="padding:9px 12px;text-align:left;color:var(--muted);font-size:0.75rem;text-transform:uppercase">Paid</th>
+            <th style="padding:9px 12px;text-align:left;color:var(--muted);font-size:0.75rem;text-transform:uppercase">Status</th>
+          </tr>
+        </thead>
+        <tbody id="import-tbody"></tbody>
+      </table>
+    </div>
+    <p style="color:var(--muted);font-size:0.82rem;margin-bottom:16px">How should these be added?</p>
+    <div class="modal-actions" style="justify-content:space-between;align-items:center">
+      <button class="btn-secondary" onclick="document.getElementById('import-modal').classList.remove('open')">Cancel</button>
+      <div style="display:flex;gap:10px">
+        <button class="btn-secondary" onclick="confirmImport('merge')" title="Skip invoices with duplicate invoice numbers">Merge (skip duplicates)</button>
+        <button class="btn-primary" onclick="confirmImport('replace')" title="Clear all existing data and load QB invoices">Replace all</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- Add/Edit Modal -->
 <div class="modal-overlay" id="modal-overlay" onclick="overlayClick(event)">
@@ -633,6 +668,184 @@
     a.href = URL.createObjectURL(blob);
     a.download = `railroad_ar_${today()}.csv`;
     a.click();
+  }
+
+  // ── QuickBooks CSV Import ──────────────────────────────────────────────────
+
+  // Maps QB Desktop column headers (case-insensitive) to our fields.
+  // QB exports vary slightly by report; we try several aliases per field.
+  const QB_MAP = {
+    invoiceNum: ['num', 'invoice #', 'invoice number', 'trans #', 'number'],
+    customer:   ['name', 'customer', 'customer:job', 'bill to'],
+    date:       ['date', 'invoice date', 'transaction date'],
+    dueDate:    ['due date', 'terms due date'],
+    amount:     ['amount', 'original amount', 'invoice amount', 'total amount', 'total'],
+    paid:       ['paid amount', 'amount paid', 'payment amount'],
+    balance:    ['open balance', 'balance', 'balance due', 'amount due', 'aging'],
+    status:     ['paid status', 'status', 'payment status'],
+    notes:      ['memo', 'notes', 'description', 'terms'],
+  };
+
+  function normalizeHeader(h) {
+    return h.toLowerCase().replace(/[\r\n"]/g, '').trim();
+  }
+
+  function parseCSVLine(line) {
+    const result = [];
+    let cur = '', inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (inQ) {
+        if (c === '"' && line[i+1] === '"') { cur += '"'; i++; }
+        else if (c === '"') inQ = false;
+        else cur += c;
+      } else {
+        if (c === '"') inQ = true;
+        else if (c === ',') { result.push(cur); cur = ''; }
+        else cur += c;
+      }
+    }
+    result.push(cur);
+    return result.map(s => s.trim());
+  }
+
+  function parseCSV(text) {
+    const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+    // Find header row — skip QB's title/date rows at top (they often have fewer commas)
+    let headerIdx = -1;
+    for (let i = 0; i < Math.min(lines.length, 15); i++) {
+      const cells = parseCSVLine(lines[i]);
+      const normalized = cells.map(normalizeHeader);
+      // A header row will contain at least 'num' or 'name' or 'date'
+      const isHeader = normalized.some(h =>
+        ['num','name','date','customer','invoice','amount','balance'].some(k => h.includes(k))
+      );
+      if (isHeader && cells.length >= 3) { headerIdx = i; break; }
+    }
+    if (headerIdx === -1) throw new Error('Could not find a header row in this file. Make sure to export the report as CSV.');
+
+    const headers = parseCSVLine(lines[headerIdx]).map(normalizeHeader);
+
+    // Build column index lookup for each of our fields
+    const colIdx = {};
+    for (const [field, aliases] of Object.entries(QB_MAP)) {
+      for (const alias of aliases) {
+        const idx = headers.findIndex(h => h === alias || h.includes(alias));
+        if (idx !== -1) { colIdx[field] = idx; break; }
+      }
+    }
+
+    const rows = [];
+    for (let i = headerIdx + 1; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      const cells = parseCSVLine(lines[i]);
+      // Skip totals/subtotals rows (QB adds "Total ..." rows)
+      const first = (cells[0] || '').toLowerCase();
+      if (first.startsWith('total') || first === '' && cells.slice(1).every(c => !c)) continue;
+
+      const get = field => colIdx[field] !== undefined ? (cells[colIdx[field]] || '').replace(/[$,]/g, '').trim() : '';
+
+      const amtRaw     = parseFloat(get('amount'))  || 0;
+      const paidRaw    = parseFloat(get('paid'))     || 0;
+      const balanceRaw = parseFloat(get('balance'))  || 0;
+
+      // Derive paid amount from balance if not directly available
+      const derivedPaid = paidRaw || (amtRaw && balanceRaw ? Math.max(0, amtRaw - balanceRaw) : 0);
+
+      const statusRaw = get('status').toLowerCase();
+      let status = 'unpaid';
+      if (statusRaw.includes('paid') && !statusRaw.includes('un')) status = 'paid';
+      else if (paidRaw > 0 && paidRaw < amtRaw) status = 'partial';
+
+      const customer = get('customer');
+      if (!customer && !amtRaw) continue; // skip empty rows
+
+      rows.push({
+        id:         crypto.randomUUID(),
+        invoiceNum: get('invoiceNum'),
+        customer,
+        date:       parseQBDate(get('date')),
+        dueDate:    parseQBDate(get('dueDate')),
+        amount:     amtRaw,
+        paid:       derivedPaid,
+        status,
+        notes:      get('notes'),
+      });
+    }
+    return rows;
+  }
+
+  function parseQBDate(d) {
+    if (!d) return '';
+    // QB exports dates as M/D/YYYY or MM/DD/YYYY
+    const m = d.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+    if (m) {
+      const [, mo, da, yr] = m;
+      const year = yr.length === 2 ? '20' + yr : yr;
+      return `${year}-${mo.padStart(2,'0')}-${da.padStart(2,'0')}`;
+    }
+    // Already ISO
+    if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
+    return '';
+  }
+
+  function importQB(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    event.target.value = ''; // reset so same file can be re-imported
+
+    const reader = new FileReader();
+    reader.onload = e => {
+      try {
+        const imported = parseCSV(e.target.result);
+        if (imported.length === 0) {
+          alert('No invoice rows found in this file. Make sure you exported an Open Invoices or A/R Aging report.');
+          return;
+        }
+        showImportPreview(imported);
+      } catch(err) {
+        alert('Import error: ' + err.message);
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  // ── Import preview modal ───────────────────────────────────────────────────
+  let pendingImport = [];
+
+  function showImportPreview(rows) {
+    pendingImport = rows;
+    document.getElementById('import-count').textContent = rows.length;
+    const tbody = document.getElementById('import-tbody');
+    tbody.innerHTML = rows.slice(0, 10).map(r => `
+      <tr>
+        <td>${esc(r.invoiceNum||'—')}</td>
+        <td>${esc(r.customer||'—')}</td>
+        <td>${fmtDate(r.date)}</td>
+        <td>${fmt(r.amount)}</td>
+        <td>${fmt(r.paid)}</td>
+        <td><span class="status-badge status-${r.status}">${r.status}</span></td>
+      </tr>`).join('');
+    if (rows.length > 10) {
+      tbody.innerHTML += `<tr><td colspan="6" style="color:var(--muted);text-align:center;padding:10px">…and ${rows.length - 10} more</td></tr>`;
+    }
+    document.getElementById('import-modal').classList.add('open');
+  }
+
+  function confirmImport(mode) {
+    if (mode === 'replace') {
+      invoices = pendingImport;
+    } else {
+      // merge: skip duplicates by invoice number
+      const existing = new Set(invoices.map(i => i.invoiceNum).filter(Boolean));
+      const newOnes = pendingImport.filter(r => !r.invoiceNum || !existing.has(r.invoiceNum));
+      invoices = [...newOnes, ...invoices];
+    }
+    save();
+    render();
+    document.getElementById('import-modal').classList.remove('open');
+    pendingImport = [];
   }
 
   // keyboard shortcut: N = new invoice
