@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Railroad AR - Charge Tracker</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --card: #22263a;
+    --border: #2e3350;
+    --accent: #4f8ef7;
+    --accent2: #7c5cbf;
+    --green: #2ecc71;
+    --yellow: #f39c12;
+    --red: #e74c3c;
+    --text: #e8eaf0;
+    --muted: #8b90a8;
+    --radius: 10px;
+  }
+
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 0;
+  }
+
+  header {
+    background: linear-gradient(135deg, #1a1d27 0%, #22263a 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 18px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  header h1 {
+    font-size: 1.4rem;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+  }
+
+  header h1 span { color: var(--accent); }
+
+  .header-actions { display: flex; gap: 10px; }
+
+  main { padding: 28px 32px; max-width: 1400px; margin: 0 auto; }
+
+  /* Aging summary cards */
+  .aging-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 16px;
+    margin-bottom: 28px;
+  }
+
+  .aging-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px 20px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .aging-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+  }
+  .aging-card.current::before { background: var(--green); }
+  .aging-card.d30::before    { background: var(--accent); }
+  .aging-card.d60::before    { background: var(--yellow); }
+  .aging-card.d90::before    { background: var(--red); }
+  .aging-card.total::before  { background: var(--accent2); }
+
+  .aging-label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+  .aging-amount { font-size: 1.6rem; font-weight: 700; }
+  .aging-count  { font-size: 0.78rem; color: var(--muted); margin-top: 4px; }
+
+  .aging-card.current .aging-amount { color: var(--green); }
+  .aging-card.d30 .aging-amount    { color: var(--accent); }
+  .aging-card.d60 .aging-amount    { color: var(--yellow); }
+  .aging-card.d90 .aging-amount    { color: var(--red); }
+  .aging-card.total .aging-amount  { color: var(--text); }
+
+  /* Controls */
+  .controls {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  input[type="text"], input[type="number"], input[type="date"], select {
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 9px 13px;
+    border-radius: 7px;
+    font-size: 0.9rem;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  input[type="text"]:focus, input[type="number"]:focus,
+  input[type="date"]:focus, select:focus {
+    border-color: var(--accent);
+  }
+
+  input[type="text"]::placeholder { color: var(--muted); }
+
+  .search-box { flex: 1; min-width: 200px; }
+
+  select option { background: var(--card); }
+
+  /* Buttons */
+  button {
+    cursor: pointer;
+    font-size: 0.88rem;
+    font-weight: 600;
+    border: none;
+    border-radius: 7px;
+    padding: 9px 16px;
+    transition: opacity 0.15s, transform 0.1s;
+  }
+  button:active { transform: scale(0.97); }
+
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { opacity: 0.88; }
+  .btn-secondary { background: var(--card); color: var(--text); border: 1px solid var(--border); }
+  .btn-secondary:hover { border-color: var(--accent); }
+  .btn-danger { background: transparent; color: var(--red); border: 1px solid transparent; padding: 5px 8px; font-size: 0.82rem; }
+  .btn-danger:hover { border-color: var(--red); }
+  .btn-sm { padding: 5px 10px; font-size: 0.82rem; }
+  .btn-export { background: var(--accent2); color: #fff; }
+  .btn-export:hover { opacity: 0.88; }
+
+  /* Table */
+  .table-wrap {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+
+  table { width: 100%; border-collapse: collapse; }
+
+  thead { background: var(--surface); }
+  th {
+    text-align: left;
+    padding: 12px 16px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--muted);
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+  }
+  th:hover { color: var(--text); }
+  th .sort-icon { margin-left: 4px; opacity: 0.4; }
+  th.sorted .sort-icon { opacity: 1; color: var(--accent); }
+
+  tbody tr {
+    border-top: 1px solid var(--border);
+    transition: background 0.1s;
+  }
+  tbody tr:hover { background: rgba(79, 142, 247, 0.05); }
+
+  td { padding: 11px 16px; font-size: 0.9rem; }
+
+  .status-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  .status-unpaid  { background: rgba(243,156,18,0.15); color: var(--yellow); }
+  .status-paid    { background: rgba(46,204,113,0.15); color: var(--green); }
+  .status-overdue { background: rgba(231,76,60,0.15);  color: var(--red); }
+  .status-partial { background: rgba(79,142,247,0.15); color: var(--accent); }
+
+  .overdue-flag { color: var(--red); font-size: 0.75rem; margin-left: 5px; }
+
+  .td-actions { display: flex; gap: 4px; }
+
+  .empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--muted);
+  }
+  .empty-state .icon { font-size: 2.5rem; margin-bottom: 12px; }
+
+  /* Modal */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 28px 32px;
+    width: 100%;
+    max-width: 520px;
+    position: relative;
+  }
+
+  .modal h2 { font-size: 1.1rem; margin-bottom: 20px; }
+
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .form-grid .full { grid-column: 1 / -1; }
+
+  label { display: block; font-size: 0.78rem; color: var(--muted); margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.4px; }
+
+  .form-grid input, .form-grid select, .form-grid textarea {
+    width: 100%;
+  }
+  textarea {
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 9px 13px;
+    border-radius: 7px;
+    font-size: 0.9rem;
+    resize: vertical;
+    min-height: 70px;
+    font-family: inherit;
+    outline: none;
+  }
+  textarea:focus { border-color: var(--accent); }
+
+  .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 22px; }
+
+  .close-btn {
+    position: absolute;
+    top: 16px; right: 20px;
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 1.2rem;
+    padding: 4px 8px;
+  }
+  .close-btn:hover { color: var(--text); }
+
+  /* Responsive */
+  @media (max-width: 700px) {
+    main { padding: 16px; }
+    header { padding: 14px 16px; }
+    .form-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Railroad <span>AR</span> &mdash; Charge Tracker</h1>
+  <div class="header-actions">
+    <button class="btn-export btn-secondary" onclick="exportCSV()">Export CSV</button>
+    <button class="btn-primary" onclick="openModal()">+ New Invoice</button>
+  </div>
+</header>
+
+<main>
+  <!-- Aging summary -->
+  <div class="aging-grid">
+    <div class="aging-card current">
+      <div class="aging-label">Current (0-30 days)</div>
+      <div class="aging-amount" id="ag-current">$0.00</div>
+      <div class="aging-count" id="ag-current-c">0 invoices</div>
+    </div>
+    <div class="aging-card d30">
+      <div class="aging-label">31-60 Days</div>
+      <div class="aging-amount" id="ag-30">$0.00</div>
+      <div class="aging-count" id="ag-30-c">0 invoices</div>
+    </div>
+    <div class="aging-card d60">
+      <div class="aging-label">61-90 Days</div>
+      <div class="aging-amount" id="ag-60">$0.00</div>
+      <div class="aging-count" id="ag-60-c">0 invoices</div>
+    </div>
+    <div class="aging-card d90">
+      <div class="aging-label">90+ Days</div>
+      <div class="aging-amount" id="ag-90">$0.00</div>
+      <div class="aging-count" id="ag-90-c">0 invoices</div>
+    </div>
+    <div class="aging-card total">
+      <div class="aging-label">Total Outstanding</div>
+      <div class="aging-amount" id="ag-total">$0.00</div>
+      <div class="aging-count" id="ag-total-c">0 open invoices</div>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls">
+    <input type="text" class="search-box" id="search" placeholder="Search customer, invoice #, notes..." oninput="render()">
+    <select id="filter-status" onchange="render()">
+      <option value="">All Statuses</option>
+      <option value="unpaid">Unpaid</option>
+      <option value="partial">Partial</option>
+      <option value="overdue">Overdue</option>
+      <option value="paid">Paid</option>
+    </select>
+    <select id="filter-sort" onchange="render()">
+      <option value="date-desc">Date: Newest</option>
+      <option value="date-asc">Date: Oldest</option>
+      <option value="due-asc">Due Date: Soonest</option>
+      <option value="amount-desc">Amount: High→Low</option>
+      <option value="customer-asc">Customer A→Z</option>
+    </select>
+  </div>
+
+  <!-- Table -->
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Invoice #</th>
+          <th>Customer</th>
+          <th>Invoice Date</th>
+          <th>Due Date</th>
+          <th>Amount</th>
+          <th>Balance Due</th>
+          <th>Status</th>
+          <th>Notes</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="invoice-tbody"></tbody>
+    </table>
+    <div class="empty-state" id="empty-state" style="display:none">
+      <div class="icon">🗂️</div>
+      <div>No invoices found. Add one to get started.</div>
+    </div>
+  </div>
+</main>
+
+<!-- Add/Edit Modal -->
+<div class="modal-overlay" id="modal-overlay" onclick="overlayClick(event)">
+  <div class="modal">
+    <button class="close-btn" onclick="closeModal()">✕</button>
+    <h2 id="modal-title">New Invoice</h2>
+    <div class="form-grid">
+      <div>
+        <label>Invoice #</label>
+        <input type="text" id="f-inv" placeholder="INV-001">
+      </div>
+      <div>
+        <label>Customer Name</label>
+        <input type="text" id="f-customer" placeholder="Acme Corp">
+      </div>
+      <div>
+        <label>Invoice Date</label>
+        <input type="date" id="f-date">
+      </div>
+      <div>
+        <label>Due Date</label>
+        <input type="date" id="f-due">
+      </div>
+      <div>
+        <label>Amount ($)</label>
+        <input type="number" id="f-amount" placeholder="0.00" min="0" step="0.01">
+      </div>
+      <div>
+        <label>Amount Paid ($)</label>
+        <input type="number" id="f-paid" placeholder="0.00" min="0" step="0.01">
+      </div>
+      <div>
+        <label>Status</label>
+        <select id="f-status">
+          <option value="unpaid">Unpaid</option>
+          <option value="partial">Partial Payment</option>
+          <option value="paid">Paid</option>
+          <option value="overdue">Overdue</option>
+        </select>
+      </div>
+      <div class="full">
+        <label>Notes</label>
+        <textarea id="f-notes" placeholder="Payment terms, contact info, disputes..."></textarea>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeModal()">Cancel</button>
+      <button class="btn-primary" onclick="saveInvoice()">Save Invoice</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const STORE_KEY = 'railroad_ar_invoices';
+  let invoices = JSON.parse(localStorage.getItem(STORE_KEY) || '[]');
+  let editingId = null;
+
+  function save() {
+    localStorage.setItem(STORE_KEY, JSON.stringify(invoices));
+  }
+
+  function fmt(n) {
+    return '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function daysPast(dueDateStr) {
+    if (!dueDateStr) return 0;
+    const due = new Date(dueDateStr);
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    return Math.floor((today - due) / 86400000);
+  }
+
+  function effectiveStatus(inv) {
+    if (inv.status === 'paid') return 'paid';
+    const dp = daysPast(inv.dueDate);
+    if (dp > 0 && inv.status !== 'paid') return 'overdue';
+    return inv.status || 'unpaid';
+  }
+
+  function balance(inv) {
+    return Math.max(0, (inv.amount || 0) - (inv.paid || 0));
+  }
+
+  function updateAging() {
+    const open = invoices.filter(i => effectiveStatus(i) !== 'paid');
+    let buckets = [
+      { key: 'current', min: 0,  max: 30,  amt: 0, cnt: 0 },
+      { key: '30',      min: 31, max: 60,  amt: 0, cnt: 0 },
+      { key: '60',      min: 61, max: 90,  amt: 0, cnt: 0 },
+      { key: '90',      min: 91, max: Infinity, amt: 0, cnt: 0 },
+    ];
+
+    open.forEach(inv => {
+      const dp = Math.max(0, daysPast(inv.dueDate));
+      const b = balance(inv);
+      const bucket = buckets.find(bk => dp >= bk.min && dp <= bk.max)
+                  || buckets[buckets.length - 1];
+      bucket.amt += b;
+      bucket.cnt++;
+    });
+
+    const totalAmt = buckets.reduce((s, b) => s + b.amt, 0);
+    const totalCnt = open.length;
+
+    document.getElementById('ag-current').textContent = fmt(buckets[0].amt);
+    document.getElementById('ag-current-c').textContent = buckets[0].cnt + ' invoice' + (buckets[0].cnt !== 1 ? 's' : '');
+    document.getElementById('ag-30').textContent = fmt(buckets[1].amt);
+    document.getElementById('ag-30-c').textContent = buckets[1].cnt + ' invoice' + (buckets[1].cnt !== 1 ? 's' : '');
+    document.getElementById('ag-60').textContent = fmt(buckets[2].amt);
+    document.getElementById('ag-60-c').textContent = buckets[2].cnt + ' invoice' + (buckets[2].cnt !== 1 ? 's' : '');
+    document.getElementById('ag-90').textContent = fmt(buckets[3].amt);
+    document.getElementById('ag-90-c').textContent = buckets[3].cnt + ' invoice' + (buckets[3].cnt !== 1 ? 's' : '');
+    document.getElementById('ag-total').textContent = fmt(totalAmt);
+    document.getElementById('ag-total-c').textContent = totalCnt + ' open invoice' + (totalCnt !== 1 ? 's' : '');
+  }
+
+  function render() {
+    const q = document.getElementById('search').value.toLowerCase().trim();
+    const fs = document.getElementById('filter-status').value;
+    const sort = document.getElementById('filter-sort').value;
+
+    let list = invoices.filter(inv => {
+      const es = effectiveStatus(inv);
+      if (fs && es !== fs) return false;
+      if (q) {
+        const hay = [inv.invoiceNum, inv.customer, inv.notes].join(' ').toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+
+    list.sort((a, b) => {
+      switch(sort) {
+        case 'date-asc':     return (a.date||'') < (b.date||'') ? -1 : 1;
+        case 'date-desc':    return (a.date||'') > (b.date||'') ? -1 : 1;
+        case 'due-asc':      return (a.dueDate||'') < (b.dueDate||'') ? -1 : 1;
+        case 'amount-desc':  return (b.amount||0) - (a.amount||0);
+        case 'customer-asc': return (a.customer||'').localeCompare(b.customer||'');
+        default: return 0;
+      }
+    });
+
+    const tbody = document.getElementById('invoice-tbody');
+    const empty = document.getElementById('empty-state');
+
+    if (list.length === 0) {
+      tbody.innerHTML = '';
+      empty.style.display = '';
+    } else {
+      empty.style.display = 'none';
+      tbody.innerHTML = list.map(inv => {
+        const es = effectiveStatus(inv);
+        const dp = daysPast(inv.dueDate);
+        const overdueFlag = es === 'overdue' ? `<span class="overdue-flag">(${dp}d)</span>` : '';
+        const bal = balance(inv);
+        return `
+          <tr>
+            <td><strong>${esc(inv.invoiceNum || '—')}</strong></td>
+            <td>${esc(inv.customer || '—')}</td>
+            <td>${fmtDate(inv.date)}</td>
+            <td>${fmtDate(inv.dueDate)}${overdueFlag}</td>
+            <td>${fmt(inv.amount)}</td>
+            <td><strong>${fmt(bal)}</strong></td>
+            <td><span class="status-badge status-${es}">${es}</span></td>
+            <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:0.82rem">${esc(inv.notes || '')}</td>
+            <td>
+              <div class="td-actions">
+                <button class="btn-secondary btn-sm" onclick="openModal('${inv.id}')">Edit</button>
+                <button class="btn-danger" onclick="deleteInvoice('${inv.id}')">Delete</button>
+              </div>
+            </td>
+          </tr>`;
+      }).join('');
+    }
+
+    updateAging();
+  }
+
+  function esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function fmtDate(d) {
+    if (!d) return '—';
+    const [y,m,day] = d.split('-');
+    return `${m}/${day}/${y}`;
+  }
+
+  function openModal(id) {
+    editingId = id || null;
+    document.getElementById('modal-title').textContent = id ? 'Edit Invoice' : 'New Invoice';
+
+    if (id) {
+      const inv = invoices.find(i => i.id === id);
+      if (!inv) return;
+      document.getElementById('f-inv').value      = inv.invoiceNum || '';
+      document.getElementById('f-customer').value = inv.customer   || '';
+      document.getElementById('f-date').value     = inv.date       || '';
+      document.getElementById('f-due').value      = inv.dueDate    || '';
+      document.getElementById('f-amount').value   = inv.amount     || '';
+      document.getElementById('f-paid').value     = inv.paid       || '';
+      document.getElementById('f-status').value   = inv.status     || 'unpaid';
+      document.getElementById('f-notes').value    = inv.notes      || '';
+    } else {
+      document.getElementById('f-inv').value      = '';
+      document.getElementById('f-customer').value = '';
+      document.getElementById('f-date').value     = today();
+      document.getElementById('f-due').value      = '';
+      document.getElementById('f-amount').value   = '';
+      document.getElementById('f-paid').value     = '';
+      document.getElementById('f-status').value   = 'unpaid';
+      document.getElementById('f-notes').value    = '';
+    }
+
+    document.getElementById('modal-overlay').classList.add('open');
+    document.getElementById('f-customer').focus();
+  }
+
+  function closeModal() {
+    document.getElementById('modal-overlay').classList.remove('open');
+    editingId = null;
+  }
+
+  function overlayClick(e) {
+    if (e.target === document.getElementById('modal-overlay')) closeModal();
+  }
+
+  function today() {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  function saveInvoice() {
+    const inv = {
+      id:         editingId || crypto.randomUUID(),
+      invoiceNum: document.getElementById('f-inv').value.trim(),
+      customer:   document.getElementById('f-customer').value.trim(),
+      date:       document.getElementById('f-date').value,
+      dueDate:    document.getElementById('f-due').value,
+      amount:     parseFloat(document.getElementById('f-amount').value) || 0,
+      paid:       parseFloat(document.getElementById('f-paid').value)   || 0,
+      status:     document.getElementById('f-status').value,
+      notes:      document.getElementById('f-notes').value.trim(),
+    };
+
+    if (!inv.customer) { alert('Customer name is required.'); return; }
+    if (!inv.amount)   { alert('Amount is required.'); return; }
+
+    if (editingId) {
+      const idx = invoices.findIndex(i => i.id === editingId);
+      if (idx > -1) invoices[idx] = inv;
+    } else {
+      invoices.unshift(inv);
+    }
+
+    save();
+    closeModal();
+    render();
+  }
+
+  function deleteInvoice(id) {
+    if (!confirm('Delete this invoice?')) return;
+    invoices = invoices.filter(i => i.id !== id);
+    save();
+    render();
+  }
+
+  function exportCSV() {
+    const cols = ['Invoice #','Customer','Invoice Date','Due Date','Amount','Amount Paid','Balance','Status','Notes'];
+    const rows = invoices.map(inv => [
+      inv.invoiceNum, inv.customer, inv.date, inv.dueDate,
+      inv.amount, inv.paid, balance(inv), effectiveStatus(inv), inv.notes
+    ].map(v => `"${String(v||'').replace(/"/g,'""')}"`).join(','));
+
+    const csv = [cols.join(','), ...rows].join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `railroad_ar_${today()}.csv`;
+    a.click();
+  }
+
+  // keyboard shortcut: N = new invoice
+  document.addEventListener('keydown', e => {
+    if (e.key === 'n' && !e.ctrlKey && !e.metaKey && document.activeElement.tagName === 'BODY') {
+      openModal();
+    }
+    if (e.key === 'Escape') closeModal();
+  });
+
+  render();
+</script>
+</body>
+</html>
